@@ -33,6 +33,8 @@ bool start       = true;
 bool end         = false;
 int max_time_min = 10;
 std::string data_save_path;
+int imu_count    = 0;
+double last_print_time = 0;
 
 void
 imu_callback( const sensor_msgs::ImuConstPtr& imu_msg )
@@ -48,16 +50,44 @@ imu_callback( const sensor_msgs::ImuConstPtr& imu_msg )
     acc_y->pushMPerSec2( imu_msg->linear_acceleration.y, time );
     acc_z->pushMPerSec2( imu_msg->linear_acceleration.z, time );
 
+    imu_count++;
+
     if ( start )
     {
         start_t = time;
         start   = false;
+        ROS_INFO( "\033[1;32m[imu_utils] First IMU data received! timestamp: %.4f\033[0m", time );
+        ROS_INFO( "[imu_utils] gyr: [%.6f, %.6f, %.6f] rad/s",
+                  imu_msg->angular_velocity.x,
+                  imu_msg->angular_velocity.y,
+                  imu_msg->angular_velocity.z );
+        ROS_INFO( "[imu_utils] acc: [%.6f, %.6f, %.6f] m/s^2",
+                  imu_msg->linear_acceleration.x,
+                  imu_msg->linear_acceleration.y,
+                  imu_msg->linear_acceleration.z );
+        ROS_INFO( "[imu_utils] Data collection started. Target duration: %d min", max_time_min );
+        last_print_time = time;
     }
     else
     {
         double time_min = ( time - start_t ) / 60;
+
+        // Print progress every 10 seconds
+        if ( time - last_print_time >= 10.0 )
+        {
+            double progress = ( time_min / max_time_min ) * 100.0;
+            ROS_INFO( "[imu_utils] Collecting: %.1f / %d min (%.1f%%) | %d msgs received | freq: ~%.0f Hz",
+                      time_min, max_time_min, progress, imu_count,
+                      imu_count / ( time - start_t ) );
+            last_print_time = time;
+        }
+
         if ( time_min > max_time_min )
+        {
+            ROS_INFO( "\033[1;32m[imu_utils] Data collection COMPLETE! Total msgs: %d, Duration: %.1f min\033[0m",
+                      imu_count, time_min );
             end = true;
+        }
     }
 }
 
@@ -233,13 +263,25 @@ main( int argc, char** argv )
     acc_y = new imu::AllanAcc( "acc y", max_cluster );
     acc_z = new imu::AllanAcc( "acc z", max_cluster );
     std::cout << "wait for imu data." << std::endl;
+    std::cout << "[imu_utils] Subscribing to topic: " << IMU_TOPIC << std::endl;
+    std::cout << "[imu_utils] Target duration: " << max_time_min << " min" << std::endl;
     ros::Rate loop( 100 );
+    int wait_count = 0;
 
     //    ros::spin( );
     while ( !end )
     {
         loop.sleep( );
         ros::spinOnce( );
+
+        // Periodically remind user if no data is coming
+        if ( start && ++wait_count % 500 == 0 )
+        {
+            ROS_WARN( "[imu_utils] Still waiting for IMU data on topic [%s]... (%.0f s elapsed)",
+                      IMU_TOPIC.c_str( ), wait_count / 100.0 );
+            ROS_WARN( "[imu_utils] Hint: check 'rostopic echo %s' or 'rostopic hz %s'",
+                      IMU_TOPIC.c_str( ), IMU_TOPIC.c_str( ) );
+        }
     }
 
     ///
