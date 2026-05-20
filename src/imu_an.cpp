@@ -267,6 +267,8 @@ main( int argc, char** argv )
     std::cout << "[imu_utils] Target duration: " << max_time_min << " min" << std::endl;
     ros::Rate loop( 100 );
     int wait_count = 0;
+    int no_data_count = 0;
+    int last_imu_count = 0;
 
     //    ros::spin( );
     while ( !end )
@@ -274,13 +276,34 @@ main( int argc, char** argv )
         loop.sleep( );
         ros::spinOnce( );
 
-        // Periodically remind user if no data is coming
+        // Periodically remind user if no data is coming (before first data)
         if ( start && ++wait_count % 500 == 0 )
         {
             ROS_WARN( "[imu_utils] Still waiting for IMU data on topic [%s]... (%.0f s elapsed)",
                       IMU_TOPIC.c_str( ), wait_count / 100.0 );
             ROS_WARN( "[imu_utils] Hint: check 'rostopic echo %s' or 'rostopic hz %s'",
                       IMU_TOPIC.c_str( ), IMU_TOPIC.c_str( ) );
+        }
+
+        // Detect data stream stopped (after first data received)
+        if ( !start && !end )
+        {
+            if ( imu_count == last_imu_count )
+            {
+                no_data_count++;
+                // 3 seconds with no new data (100Hz loop * 3s = 300)
+                if ( no_data_count == 300 )
+                {
+                    ROS_WARN( "\033[1;33m[imu_utils] No new IMU data for 3 seconds! Bag probably finished.\033[0m" );
+                    ROS_WARN( "[imu_utils] Total collected: %d msgs, will proceed with computation...", imu_count );
+                    end = true;
+                }
+            }
+            else
+            {
+                no_data_count = 0;
+                last_imu_count = imu_count;
+            }
         }
     }
 
